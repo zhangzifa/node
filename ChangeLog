@@ -1,3 +1,59 @@
+2015.09.14, Version 0.12.8 (LTS)
+
+* [35bbe98401] - Update addons.markdown (Max Deepfield) nodejs/node-v0.x-archive#25885
+* [9a6f1ce416] - comma (Julien Valéry) nodejs/node-v0.x-archive#25811
+* [d384bf8f84] - Update assert.markdown (daveboivin) nodejs/node-v0.x-archive#25811
+* [89b22ccbe1] - Fixed typo (Andrew Murray) nodejs/node-v0.x-archive#25811
+* [5ad05af380] - Update util.markdown (Daniel Rentz) nodejs/node-v0.x-archive#25591
+* [cb660ab3d3] - Update child_process.markdown, spelling (Jared Fox) nodejs/node-v0.x-archive#25591
+* [59c67fe3cd] - updated documentation for fs.createReadStream (Michele Caini) nodejs/node-v0.x-archive#25591
+* [53b6a615a5] - Documentation update about Buffer initialization (Sarath) nodejs/node-v0.x-archive#25591
+* [b8d47a7b6f] - fix (Fedor Indutny) nodejs/node-v0.x-archive#25739
+* [4f2456369c] - build: work around VS2015 issue in ICU <56 (Steven R. Loomis) nodejs/node-v0.x-archive#25804
+* [15030f26fd] - build: Intl: bump ICU4C from 54 to 55 (backport) (Steven R. Loomis) nodejs/node-v0.x-archive#25856
+* [1083fa70f0] - build: run-ci makefile rule (Alexis Campailla) nodejs/node-v0.x-archive#25653
+* [2d2494cf14] - build: support flaky tests in test-ci (Alexis Campailla) nodejs/node-v0.x-archive#25653
+* [b25d26f2ef] - build: support Jenkins via test-ci (Alexis Campailla) nodejs/node-v0.x-archive#25653
+* [b5a0abcfdf] - child_process: clone spawn options argument (cjihrig) nodejs/node-v0.x-archive#9159
+* [8b81f98c41] - configure: add --without-mdb flag (cgalibern) nodejs/node-v0.x-archive#25707
+* [071c860c2b] - crypto: replace rwlocks with simple mutexes (Ben Noordhuis) #2723
+* [f693565813] - deps: upgrade to npm 2.13.4 (Kat Marchán) nodejs/node-v0.x-archive#25825
+* [2860c53562] - doc: fixed child_process.exec doc (Tyler Anton) nodejs/node-v0.x-archive#14088
+* [4a91fa11a3] - doc: Update docs for os.platform() (George Kotchlamazashvili) nodejs/node-v0.x-archive#25777
+* [b03ab02fe8] - doc: Change the link for v8 docs to v8dox.com (Chad Walker) nodejs/node-v0.x-archive#25811
+* [1fd8f37efd] - doc: buffer, adding missing backtick (Dyana Rose) nodejs/node-v0.x-archive#25811
+* [162d0db3bb] - doc: tls.markdown, adjust version from v0.10.39 to v0.10.x (James M Snell) nodejs/node-v0.x-archive#25591
+* [eda2560cdc] - doc: additional refinement to readable event (James M Snell) nodejs/node-v0.x-archive#25591
+* [881d9bea01] - doc: readable event clarification (James M Snell) nodejs/node-v0.x-archive#25591
+* [b6378f0c75] - doc: stream.unshift does not reset reading state (James M Snell) nodejs/node-v0.x-archive#25591
+* [4952e2b4d2] - doc: clarify Readable._read and Readable.push (fresheneesz) nodejs/node-v0.x-archive#25591
+* [14000b97d4] - doc: two minor stream doc improvements (James M Snell) nodejs/node-v0.x-archive#25591
+* [6b6bd21497] - doc: Clarified read method with specified size argument. (Philippe Laferriere) nodejs/node-v0.x-archive#25591
+* [16f547600a] - doc: Document http.request protocol option (Ville Skyttä) nodejs/node-v0.x-archive#25591
+* [618e4ecda9] - doc: add a note about readable in flowing mode (James M Snell) nodejs/node-v0.x-archive#25591
+* [0b165be37b] - doc: fix line wrapping in buffer.markdown (James M Snell) nodejs/node-v0.x-archive#25591
+* [70dd13f88d] - doc: add CleartextStream deprecation notice (James M Snell) nodejs/node-v0.x-archive#25591
+* [418cde0765] - doc: mention that mode is ignored if file exists (James M Snell) nodejs/node-v0.x-archive#25591
+* [85bcb281e4] - doc: improve http.abort description (James M Snell) nodejs/node-v0.x-archive#25591
+* [5ccb429ee8] - doc, comments: Grammar and spelling fixes (Ville Skyttä) nodejs/node-v0.x-archive#25591
+* [a24db43101] - docs: event emitter behavior notice (Samuel Mills (Henchman)) nodejs/node-v0.x-archive#25467
+* [8cbf7cb021] - docs: events clarify emitter.listener() behavior (Benjamin Steephenson) nodejs/node-v0.x-archive#25591
+* [b7229debbe] - docs: Fix default options for fs.createWriteStream() (Chris Neave) nodejs/node-v0.x-archive#25591
+* [261fa3620f] - src: fix intermittent SIGSEGV in resolveTxt (Evan Lucas) nodejs/node-v0.x-archive#9300
+* [1f7257b02d] - test: mark test-https-aws-ssl flaky on linux (João Reis) nodejs/node-v0.x-archive#25893
+* [cf435d55db] - test: mark test-signal-unregister as flaky (Alexis Campailla) nodejs/node-v0.x-archive#25750
+* [ceb6a8c131] - test: fix test-debug-port-from-cmdline (João Reis) nodejs/node-v0.x-archive#25748
+* [22997731e6] - test: add regression test for #25735 (Fedor Indutny) nodejs/node-v0.x-archive#25739
+* [39e05639f4] - test: mark http-pipeline-flood flaky on win32 (Julien Gilli) nodejs/node-v0.x-archive#25707
+* [78d256e7f5] - test: unmark tests that are no longer flaky (João Reis) nodejs/node-v0.x-archive#25676
+* [a9b642cf5b] - test: runner should return 0 on flaky tests (Alexis Campailla) nodejs/node-v0.x-archive#25653
+* [b48639befd] - test: support writing test output to file (Alexis Campailla) nodejs/node-v0.x-archive#25653
+* [0363cf4a80] - tls: Closing parent socket also closes the tls sock (Devin Nakamura) nodejs/node-v0.x-archive#25642
+* [75697112e8] - tls: do not hang without `newSession` handler (Fedor Indutny) nodejs/node-v0.x-archive#25739
+* [d998a65058] - tools: pass constant to logger instead of string (Johan Bergström) nodejs/node-v0.x-archive#25653
+* [14db629497] - win,msi: correct installation path registry keys (João Reis) nodejs/node-v0.x-archive#25640
+* [8e80528453] - win,msi: change InstallScope to perMachine (João Reis) nodejs/node-v0.x-archive#25640
+
 2015.07.09, Version 0.12.7 (Stable)
 
 * openssl: upgrade to 1.0.1p
