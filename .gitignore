@@ -23,8 +23,7 @@ icu_config.gypi
 /out
 
 # various stuff that VC++ produces/uses
-Debug/
-!node_modules/debug/
+/Debug
 Release/
 !doc/blog/**
 *.sln
