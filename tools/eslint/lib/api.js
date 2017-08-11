@@ -5,9 +5,12 @@
 
 "use strict";
 
+const Linter = require("./linter");
+
 module.exports = {
-    linter: require("./eslint"),
-    cli: require("./cli"),
+    linter: new Linter(),
+    Linter,
     CLIEngine: require("./cli-engine"),
-    validator: require("./config-validator")
+    RuleTester: require("./testers/rule-tester"),
+    SourceCode: require("./util/source-code")
 };

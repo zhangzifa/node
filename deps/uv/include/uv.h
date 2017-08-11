@@ -230,6 +230,7 @@ typedef struct uv_work_s uv_work_t;
 typedef struct uv_cpu_info_s uv_cpu_info_t;
 typedef struct uv_interface_address_s uv_interface_address_t;
 typedef struct uv_dirent_s uv_dirent_t;
+typedef struct uv_passwd_s uv_passwd_t;
 
 typedef enum {
   UV_LOOP_BLOCK_SIGNAL
@@ -273,6 +274,7 @@ UV_EXTERN void uv_loop_delete(uv_loop_t*);
 UV_EXTERN size_t uv_loop_size(void);
 UV_EXTERN int uv_loop_alive(const uv_loop_t* loop);
 UV_EXTERN int uv_loop_configure(uv_loop_t* loop, uv_loop_option option, ...);
+UV_EXTERN int uv_loop_fork(uv_loop_t* loop);
 
 UV_EXTERN int uv_run(uv_loop_t*, uv_run_mode mode);
 UV_EXTERN void uv_stop(uv_loop_t*);
@@ -361,6 +363,8 @@ typedef enum {
   UV_JOIN_GROUP
 } uv_membership;
 
+
+UV_EXTERN int uv_translate_sys_error(int sys_errno);
 
 UV_EXTERN const char* uv_strerror(int err);
 UV_EXTERN const char* uv_err_name(int err);
@@ -714,7 +718,8 @@ struct uv_poll_s {
 
 enum uv_poll_event {
   UV_READABLE = 1,
-  UV_WRITABLE = 2
+  UV_WRITABLE = 2,
+  UV_DISCONNECT = 4
 };
 
 UV_EXTERN int uv_poll_init(uv_loop_t* loop, uv_poll_t* handle, int fd);
@@ -1000,6 +1005,14 @@ struct uv_interface_address_s {
   } netmask;
 };
 
+struct uv_passwd_s {
+  char* username;
+  long uid;
+  long gid;
+  char* shell;
+  char* homedir;
+};
+
 typedef enum {
   UV_DIRENT_UNKNOWN,
   UV_DIRENT_FILE,
@@ -1021,6 +1034,7 @@ UV_EXTERN int uv_get_process_title(char* buffer, size_t size);
 UV_EXTERN int uv_set_process_title(const char* title);
 UV_EXTERN int uv_resident_set_memory(size_t* rss);
 UV_EXTERN int uv_uptime(double* uptime);
+UV_EXTERN uv_os_fd_t uv_get_osfhandle(int fd);
 
 typedef struct {
   long tv_sec;
@@ -1049,6 +1063,9 @@ typedef struct {
 UV_EXTERN int uv_getrusage(uv_rusage_t* rusage);
 
 UV_EXTERN int uv_os_homedir(char* buffer, size_t* size);
+UV_EXTERN int uv_os_tmpdir(char* buffer, size_t* size);
+UV_EXTERN int uv_os_get_passwd(uv_passwd_t* pwd);
+UV_EXTERN void uv_os_free_passwd(uv_passwd_t* pwd);
 
 UV_EXTERN int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count);
 UV_EXTERN void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count);
@@ -1057,6 +1074,12 @@ UV_EXTERN int uv_interface_addresses(uv_interface_address_t** addresses,
                                      int* count);
 UV_EXTERN void uv_free_interface_addresses(uv_interface_address_t* addresses,
                                            int count);
+
+UV_EXTERN int uv_os_getenv(const char* name, char* buffer, size_t* size);
+UV_EXTERN int uv_os_setenv(const char* name, const char* value);
+UV_EXTERN int uv_os_unsetenv(const char* name);
+
+UV_EXTERN int uv_os_gethostname(char* buffer, size_t* size);
 
 
 typedef enum {
@@ -1309,6 +1332,9 @@ UV_EXTERN int uv_signal_init(uv_loop_t* loop, uv_signal_t* handle);
 UV_EXTERN int uv_signal_start(uv_signal_t* handle,
                               uv_signal_cb signal_cb,
                               int signum);
+UV_EXTERN int uv_signal_start_oneshot(uv_signal_t* handle,
+                                      uv_signal_cb signal_cb,
+                                      int signum);
 UV_EXTERN int uv_signal_stop(uv_signal_t* handle);
 
 UV_EXTERN void uv_loadavg(double avg[3]);

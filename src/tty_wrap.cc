@@ -1,3 +1,24 @@
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 #include "tty_wrap.h"
 
 #include "env.h"
@@ -15,14 +36,11 @@ namespace node {
 
 using v8::Array;
 using v8::Context;
-using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::Integer;
 using v8::Local;
 using v8::Object;
-using v8::PropertyAttribute;
-using v8::String;
 using v8::Value;
 
 
@@ -35,8 +53,12 @@ void TTYWrap::Initialize(Local<Object> target,
   t->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "TTY"));
   t->InstanceTemplate()->SetInternalFieldCount(1);
 
+  env->SetProtoMethod(t, "getAsyncId", AsyncWrap::GetAsyncId);
+
   env->SetProtoMethod(t, "close", HandleWrap::Close);
   env->SetProtoMethod(t, "unref", HandleWrap::Unref);
+  env->SetProtoMethod(t, "ref", HandleWrap::Ref);
+  env->SetProtoMethod(t, "hasRef", HandleWrap::HasRef);
 
   StreamWrap::AddMethods(env, t, StreamBase::kFlagNoShutdown);
 
@@ -90,7 +112,10 @@ void TTYWrap::IsTTY(const FunctionCallbackInfo<Value>& args) {
 void TTYWrap::GetWindowSize(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
 
-  TTYWrap* wrap = Unwrap<TTYWrap>(args.Holder());
+  TTYWrap* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap,
+                          args.Holder(),
+                          args.GetReturnValue().Set(UV_EBADF));
   CHECK(args[0]->IsArray());
 
   int width, height;
@@ -107,7 +132,10 @@ void TTYWrap::GetWindowSize(const FunctionCallbackInfo<Value>& args) {
 
 
 void TTYWrap::SetRawMode(const FunctionCallbackInfo<Value>& args) {
-  TTYWrap* wrap = Unwrap<TTYWrap>(args.Holder());
+  TTYWrap* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap,
+                          args.Holder(),
+                          args.GetReturnValue().Set(UV_EBADF));
   int err = uv_tty_set_mode(&wrap->handle_, args[0]->IsTrue());
   args.GetReturnValue().Set(err);
 }
@@ -124,17 +152,25 @@ void TTYWrap::New(const FunctionCallbackInfo<Value>& args) {
   int fd = args[0]->Int32Value();
   CHECK_GE(fd, 0);
 
-  TTYWrap* wrap = new TTYWrap(env, args.This(), fd, args[1]->IsTrue());
+  int err = 0;
+  TTYWrap* wrap = new TTYWrap(env, args.This(), fd, args[1]->IsTrue(), &err);
+  if (err != 0)
+    return env->ThrowUVException(err, "uv_tty_init");
+
   wrap->UpdateWriteQueueSize();
 }
 
 
-TTYWrap::TTYWrap(Environment* env, Local<Object> object, int fd, bool readable)
+TTYWrap::TTYWrap(Environment* env,
+                 Local<Object> object,
+                 int fd,
+                 bool readable,
+                 int* init_err)
     : StreamWrap(env,
                  object,
                  reinterpret_cast<uv_stream_t*>(&handle_),
                  AsyncWrap::PROVIDER_TTYWRAP) {
-  uv_tty_init(env->event_loop(), &handle_, fd, readable);
+  *init_err = uv_tty_init(env->event_loop(), &handle_, fd, readable);
 }
 
 }  // namespace node

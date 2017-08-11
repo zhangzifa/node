@@ -3,37 +3,11 @@
 // found in the LICENSE file.
 
 #include "src/ic/access-compiler.h"
-
+#include "src/assembler-inl.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
-
-
-Handle<Code> PropertyAccessCompiler::GetCodeWithFlags(Code::Flags flags,
-                                                      const char* name) {
-  // Create code object in the heap.
-  CodeDesc desc;
-  masm()->GetCode(&desc);
-  Handle<Code> code = factory()->NewCode(desc, flags, masm()->CodeObject());
-  if (code->IsCodeStubOrIC()) code->set_stub_key(CodeStub::NoCacheKey());
-#ifdef ENABLE_DISASSEMBLER
-  if (FLAG_print_code_stubs) {
-    OFStream os(stdout);
-    code->Disassemble(name, os);
-  }
-#endif
-  return code;
-}
-
-
-Handle<Code> PropertyAccessCompiler::GetCodeWithFlags(Code::Flags flags,
-                                                      Handle<Name> name) {
-  return (FLAG_print_code_stubs && !name.is_null() && name->IsString())
-             ? GetCodeWithFlags(flags,
-                                Handle<String>::cast(name)->ToCString().get())
-             : GetCodeWithFlags(flags, NULL);
-}
-
 
 void PropertyAccessCompiler::TailCallBuiltin(MacroAssembler* masm,
                                              Builtins::Name name) {
@@ -41,13 +15,17 @@ void PropertyAccessCompiler::TailCallBuiltin(MacroAssembler* masm,
   GenerateTailCall(masm, code);
 }
 
-
-Register* PropertyAccessCompiler::GetCallingConvention(Code::Kind kind) {
+Register* PropertyAccessCompiler::GetCallingConvention(Isolate* isolate,
+                                                       Code::Kind kind) {
+  AccessCompilerData* data = isolate->access_compiler_data();
+  if (!data->IsInitialized()) {
+    InitializePlatformSpecific(data);
+  }
   if (kind == Code::LOAD_IC || kind == Code::KEYED_LOAD_IC) {
-    return load_calling_convention();
+    return data->load_calling_convention();
   }
   DCHECK(kind == Code::STORE_IC || kind == Code::KEYED_STORE_IC);
-  return store_calling_convention();
+  return data->store_calling_convention();
 }
 
 
@@ -55,9 +33,8 @@ Register PropertyAccessCompiler::slot() const {
   if (kind() == Code::LOAD_IC || kind() == Code::KEYED_LOAD_IC) {
     return LoadDescriptor::SlotRegister();
   }
-  DCHECK(FLAG_vector_stores &&
-         (kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC));
-  return VectorStoreICDescriptor::SlotRegister();
+  DCHECK(kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC);
+  return StoreWithVectorDescriptor::SlotRegister();
 }
 
 
@@ -65,9 +42,8 @@ Register PropertyAccessCompiler::vector() const {
   if (kind() == Code::LOAD_IC || kind() == Code::KEYED_LOAD_IC) {
     return LoadWithVectorDescriptor::VectorRegister();
   }
-  DCHECK(FLAG_vector_stores &&
-         (kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC));
-  return VectorStoreICDescriptor::VectorRegister();
+  DCHECK(kind() == Code::STORE_IC || kind() == Code::KEYED_STORE_IC);
+  return StoreWithVectorDescriptor::VectorRegister();
 }
 }  // namespace internal
 }  // namespace v8

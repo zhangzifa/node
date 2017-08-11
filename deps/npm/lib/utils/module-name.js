@@ -1,6 +1,5 @@
 'use strict'
 var path = require('path')
-var validate = require('aproba')
 
 module.exports = moduleName
 module.exports.test = {}
@@ -11,7 +10,7 @@ function pathToPackageName (dir) {
   if (dir === '') return ''
   var name = path.relative(path.resolve(dir, '..'), dir)
   var scoped = path.relative(path.resolve(dir, '../..'), dir)
-  if (scoped[0] === '@') return scoped
+  if (scoped[0] === '@') return scoped.replace(/\\/g, '/')
   return name
 }
 
@@ -22,7 +21,6 @@ function isNotEmpty (str) {
 
 var unknown = 0
 function moduleName (tree) {
-  validate('O', arguments)
   var pkg = tree.package || tree
   if (isNotEmpty(pkg.name)) return pkg.name
   var pkgName = pathToPackageName(tree.path)

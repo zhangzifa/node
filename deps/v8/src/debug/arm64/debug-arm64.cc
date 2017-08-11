@@ -4,9 +4,13 @@
 
 #if V8_TARGET_ARCH_ARM64
 
-#include "src/arm64/frames-arm64.h"
-#include "src/codegen.h"
 #include "src/debug/debug.h"
+
+#include "src/arm64/frames-arm64.h"
+#include "src/arm64/macro-assembler-arm64-inl.h"
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -25,26 +29,26 @@ void EmitDebugBreakSlot(Assembler* masm) {
 }
 
 
-void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode,
-                                int call_argc) {
+void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode) {
   // Generate enough nop's to make space for a call instruction. Avoid emitting
   // the constant pool in the debug break slot code.
   InstructionAccurateScope scope(masm, Assembler::kDebugBreakSlotInstructions);
-  masm->RecordDebugBreakSlot(mode, call_argc);
+  masm->RecordDebugBreakSlot(mode);
   EmitDebugBreakSlot(masm);
 }
 
 
-void DebugCodegen::ClearDebugBreakSlot(Address pc) {
-  PatchingAssembler patcher(reinterpret_cast<Instruction*>(pc),
+void DebugCodegen::ClearDebugBreakSlot(Isolate* isolate, Address pc) {
+  PatchingAssembler patcher(isolate, pc,
                             Assembler::kDebugBreakSlotInstructions);
   EmitDebugBreakSlot(&patcher);
 }
 
 
-void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
-  DCHECK_EQ(Code::BUILTIN, code->kind());
-  PatchingAssembler patcher(reinterpret_cast<Instruction*>(pc),
+void DebugCodegen::PatchDebugBreakSlot(Isolate* isolate, Address pc,
+                                       Handle<Code> code) {
+  DCHECK(code->is_debug_stub());
+  PatchingAssembler patcher(isolate, pc,
                             Assembler::kDebugBreakSlotInstructions);
   // Patch the code emitted by DebugCodegen::GenerateSlots, changing the debug
   // break slot code from
@@ -74,23 +78,26 @@ void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
   patcher.blr(ip0);
 }
 
+bool DebugCodegen::DebugBreakSlotIsPatched(Address pc) {
+  Instruction* current_instr = reinterpret_cast<Instruction*>(pc);
+  return !current_instr->IsNop(Assembler::DEBUG_BREAK_NOP);
+}
 
 void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
                                           DebugBreakCallHelperMode mode) {
   __ RecordComment("Debug break");
-  Register scratch = x10;
   {
     FrameScope scope(masm, StackFrame::INTERNAL);
 
-    // Load padding words on stack.
-    __ Mov(scratch, Smi::FromInt(LiveEdit::kFramePaddingValue));
-    __ PushMultipleTimes(scratch, LiveEdit::kFramePaddingInitialSize);
-    __ Mov(scratch, Smi::FromInt(LiveEdit::kFramePaddingInitialSize));
-    __ Push(scratch);
-
-    if (mode == SAVE_RESULT_REGISTER) __ Push(x0);
-
-    __ Mov(x0, 0);  // No arguments.
+    // Push arguments for DebugBreak call.
+    if (mode == SAVE_RESULT_REGISTER) {
+      // Break on return.
+      __ Push(x0);
+    } else {
+      // Non-return breaks.
+      __ Push(masm->isolate()->factory()->the_hole_value());
+    }
+    __ Mov(x0, 1);
     __ Mov(x1, ExternalReference(Runtime::FunctionForId(Runtime::kDebugBreak),
                                  masm->isolate()));
 
@@ -100,61 +107,55 @@ void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
     if (FLAG_debug_code) {
       for (int i = 0; i < kNumJSCallerSaved; i++) {
         Register reg = Register::XRegFromCode(JSCallerSavedCode(i));
-        __ Mov(reg, Operand(kDebugZapValue));
+        // Do not clobber x0 if mode is SAVE_RESULT_REGISTER. It will
+        // contain return value of the function.
+        if (!(reg.is(x0) && (mode == SAVE_RESULT_REGISTER))) {
+          __ Mov(reg, Operand(kDebugZapValue));
+        }
       }
     }
-
-    // Restore the register values from the expression stack.
-    if (mode == SAVE_RESULT_REGISTER) __ Pop(x0);
-
-    // Don't bother removing padding bytes pushed on the stack
-    // as the frame is going to be restored right away.
-
     // Leave the internal frame.
   }
 
-  // Now that the break point has been handled, resume normal execution by
-  // jumping to the target address intended by the caller and that was
-  // overwritten by the address of DebugBreakXXX.
-  ExternalReference after_break_target =
-      ExternalReference::debug_after_break_target_address(masm->isolate());
-  __ Mov(scratch, after_break_target);
-  __ Ldr(scratch, MemOperand(scratch));
-  __ Br(scratch);
-}
+  __ MaybeDropFrames();
 
-
-void DebugCodegen::GeneratePlainReturnLiveEdit(MacroAssembler* masm) {
+  // Return to caller.
   __ Ret();
 }
 
+void DebugCodegen::GenerateHandleDebuggerStatement(MacroAssembler* masm) {
+  {
+    FrameScope scope(masm, StackFrame::INTERNAL);
+    __ CallRuntime(Runtime::kHandleDebuggerStatement, 0);
+  }
+  __ MaybeDropFrames();
 
-void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
-  ExternalReference restarter_frame_function_slot =
-      ExternalReference::debug_restarter_frame_function_pointer_address(
-          masm->isolate());
-  UseScratchRegisterScope temps(masm);
-  Register scratch = temps.AcquireX();
+  // Return to caller.
+  __ Ret();
+}
 
-  __ Mov(scratch, restarter_frame_function_slot);
-  __ Str(xzr, MemOperand(scratch));
-
-  // We do not know our frame height, but set sp based on fp.
-  __ Sub(masm->StackPointer(), fp, kPointerSize);
+void DebugCodegen::GenerateFrameDropperTrampoline(MacroAssembler* masm) {
+  // Frame is being dropped:
+  // - Drop to the target frame specified by x1.
+  // - Look up current function on the frame.
+  // - Leave the frame.
+  // - Restart the frame by calling the function.
+  __ Mov(fp, x1);
   __ AssertStackConsistency();
+  __ Ldr(x1, MemOperand(fp, JavaScriptFrameConstants::kFunctionOffset));
 
-  __ Pop(x1, fp, lr);  // Function, Frame, Return address.
+  __ Mov(masm->StackPointer(), Operand(fp));
+  __ Pop(fp, lr);  // Frame, Return address.
 
-  // Load context from the function.
-  __ Ldr(cp, FieldMemOperand(x1, JSFunction::kContextOffset));
+  __ Ldr(x0, FieldMemOperand(x1, JSFunction::kSharedFunctionInfoOffset));
+  __ Ldr(x0,
+         FieldMemOperand(x0, SharedFunctionInfo::kFormalParameterCountOffset));
+  __ mov(x2, x0);
 
-  // Get function code.
-  __ Ldr(scratch, FieldMemOperand(x1, JSFunction::kSharedFunctionInfoOffset));
-  __ Ldr(scratch, FieldMemOperand(scratch, SharedFunctionInfo::kCodeOffset));
-  __ Add(scratch, scratch, Code::kHeaderSize - kHeapObjectTag);
-
-  // Re-run JSFunction, x1 is function, cp is context.
-  __ Br(scratch);
+  ParameterCount dummy1(x2);
+  ParameterCount dummy2(x0);
+  __ InvokeFunction(x1, dummy1, dummy2, JUMP_FUNCTION,
+                    CheckDebugStepCallWrapper());
 }
 
 

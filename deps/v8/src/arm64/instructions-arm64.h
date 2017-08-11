@@ -7,12 +7,12 @@
 
 #include "src/arm64/constants-arm64.h"
 #include "src/arm64/utils-arm64.h"
+#include "src/assembler.h"
 #include "src/globals.h"
 #include "src/utils.h"
 
 namespace v8 {
 namespace internal {
-
 
 // ISA constants. --------------------------------------------------------------
 
@@ -373,8 +373,10 @@ class Instruction {
   bool IsTargetInImmPCOffsetRange(Instruction* target);
   // Patch a PC-relative offset to refer to 'target'. 'this' may be a branch or
   // a PC-relative addressing instruction.
-  void SetImmPCOffsetTarget(Instruction* target);
-  void SetUnresolvedInternalReferenceImmTarget(Instruction* target);
+  void SetImmPCOffsetTarget(AssemblerBase::IsolateData isolate_data,
+                            Instruction* target);
+  void SetUnresolvedInternalReferenceImmTarget(AssemblerBase::IsolateData,
+                                               Instruction* target);
   // Patch a literal load instruction to load from 'source'.
   void SetImmLLiteral(Instruction* source);
 
@@ -410,7 +412,8 @@ class Instruction {
 
   static const int ImmPCRelRangeBitwidth = 21;
   static bool IsValidPCRelOffset(ptrdiff_t offset) { return is_int21(offset); }
-  void SetPCRelImmTarget(Instruction* target);
+  void SetPCRelImmTarget(AssemblerBase::IsolateData isolate_data,
+                         Instruction* target);
   void SetBranchImmTarget(Instruction* target);
 };
 
@@ -532,7 +535,8 @@ enum DebugParameters {
 };
 
 
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 
 #endif  // V8_ARM64_INSTRUCTIONS_ARM64_H_

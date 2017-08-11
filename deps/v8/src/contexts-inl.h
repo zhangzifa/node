@@ -6,7 +6,11 @@
 #define V8_CONTEXTS_INL_H_
 
 #include "src/contexts.h"
+#include "src/heap/heap.h"
 #include "src/objects-inl.h"
+#include "src/objects/dictionary.h"
+#include "src/objects/map-inl.h"
+#include "src/objects/regexp-match-info.h"
 
 namespace v8 {
 namespace internal {
@@ -33,7 +37,8 @@ void ScriptContextTable::set_used(int used) {
 Handle<Context> ScriptContextTable::GetContext(Handle<ScriptContextTable> table,
                                                int i) {
   DCHECK(i < table->used());
-  return Handle<Context>::cast(FixedArray::get(table, i + kFirstContextSlot));
+  return Handle<Context>::cast(
+      FixedArray::get(*table, i + kFirstContextSlot, table->GetIsolate()));
 }
 
 
@@ -55,25 +60,26 @@ Context* Context::previous() {
 }
 void Context::set_previous(Context* context) { set(PREVIOUS_INDEX, context); }
 
+Object* Context::next_context_link() { return get(Context::NEXT_CONTEXT_LINK); }
 
-bool Context::has_extension() { return extension() != nullptr; }
-Object* Context::extension() { return get(EXTENSION_INDEX); }
-void Context::set_extension(Object* object) { set(EXTENSION_INDEX, object); }
-
-
-JSModule* Context::module() { return JSModule::cast(get(EXTENSION_INDEX)); }
-void Context::set_module(JSModule* module) { set(EXTENSION_INDEX, module); }
-
-
-GlobalObject* Context::global_object() {
-  Object* result = get(GLOBAL_OBJECT_INDEX);
-  DCHECK(IsBootstrappingOrGlobalObject(this->GetIsolate(), result));
-  return reinterpret_cast<GlobalObject*>(result);
+bool Context::has_extension() { return !extension()->IsTheHole(GetIsolate()); }
+HeapObject* Context::extension() {
+  return HeapObject::cast(get(EXTENSION_INDEX));
+}
+void Context::set_extension(HeapObject* object) {
+  set(EXTENSION_INDEX, object);
 }
 
 
-void Context::set_global_object(GlobalObject* object) {
-  set(GLOBAL_OBJECT_INDEX, object);
+Context* Context::native_context() {
+  Object* result = get(NATIVE_CONTEXT_INDEX);
+  DCHECK(IsBootstrappingOrNativeContext(this->GetIsolate(), result));
+  return reinterpret_cast<Context*>(result);
+}
+
+
+void Context::set_native_context(Context* context) {
+  set(NATIVE_CONTEXT_INDEX, context);
 }
 
 
@@ -100,6 +106,10 @@ bool Context::IsWithContext() {
   return map == map->GetHeap()->with_context_map();
 }
 
+bool Context::IsDebugEvaluateContext() {
+  Map* map = this->map();
+  return map == map->GetHeap()->debug_evaluate_context_map();
+}
 
 bool Context::IsBlockContext() {
   Map* map = this->map();
@@ -112,16 +122,23 @@ bool Context::IsModuleContext() {
   return map == map->GetHeap()->module_context_map();
 }
 
+bool Context::IsEvalContext() {
+  Map* map = this->map();
+  return map == map->GetHeap()->eval_context_map();
+}
 
 bool Context::IsScriptContext() {
   Map* map = this->map();
   return map == map->GetHeap()->script_context_map();
 }
 
+bool Context::OSROptimizedCodeCacheIsCleared() {
+  return osr_code_table() == GetHeap()->empty_fixed_array();
+}
 
 bool Context::HasSameSecurityTokenAs(Context* that) {
-  return this->global_object()->native_context()->security_token() ==
-         that->global_object()->native_context()->security_token();
+  return this->native_context()->security_token() ==
+         that->native_context()->security_token();
 }
 
 

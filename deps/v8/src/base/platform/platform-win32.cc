@@ -24,8 +24,8 @@
 #include "src/base/macros.h"
 #include "src/base/platform/platform.h"
 #include "src/base/platform/time.h"
+#include "src/base/timezone-cache.h"
 #include "src/base/utils/random-number-generator.h"
-
 
 // Extra functions for MinGW. Most of these are the _s functions which are in
 // the Microsoft Visual Studio C++ CRT.
@@ -46,9 +46,8 @@ inline void MemoryBarrier() {
 
 
 int localtime_s(tm* out_tm, const time_t* time) {
-  tm* posix_local_time_struct = localtime(time);  // NOLINT
+  tm* posix_local_time_struct = localtime_r(time, out_tm);
   if (posix_local_time_struct == NULL) return 1;
-  *out_tm = *posix_local_time_struct;
   return 0;
 }
 
@@ -102,13 +101,19 @@ bool g_hard_abort = false;
 
 }  // namespace
 
-class TimezoneCache {
+class WindowsTimezoneCache : public TimezoneCache {
  public:
-  TimezoneCache() : initialized_(false) { }
+  WindowsTimezoneCache() : initialized_(false) {}
 
-  void Clear() {
-    initialized_ = false;
-  }
+  ~WindowsTimezoneCache() override {}
+
+  void Clear() override { initialized_ = false; }
+
+  const char* LocalTimezone(double time) override;
+
+  double LocalTimeOffset() override;
+
+  double DaylightSavingsOffset(double time) override;
 
   // Initialize timezone information. The timezone information is obtained from
   // windows. If we cannot get the timezone information we fall back to CET.
@@ -217,14 +222,14 @@ class Win32Time {
   // LocalOffset(CET) = 3600000 and LocalOffset(PST) = -28800000. This
   // routine also takes into account whether daylight saving is effect
   // at the time.
-  int64_t LocalOffset(TimezoneCache* cache);
+  int64_t LocalOffset(WindowsTimezoneCache* cache);
 
   // Returns the daylight savings time offset for the time in milliseconds.
-  int64_t DaylightSavingsOffset(TimezoneCache* cache);
+  int64_t DaylightSavingsOffset(WindowsTimezoneCache* cache);
 
   // Returns a string identifying the current timezone for the
   // timestamp taking into account daylight saving.
-  char* LocalTimezone(TimezoneCache* cache);
+  char* LocalTimezone(WindowsTimezoneCache* cache);
 
  private:
   // Constants for time conversion.
@@ -236,7 +241,7 @@ class Win32Time {
   static const bool kShortTzNames = false;
 
   // Return whether or not daylight savings time is in effect at this time.
-  bool InDST(TimezoneCache* cache);
+  bool InDST(WindowsTimezoneCache* cache);
 
   // Accessor for FILETIME representation.
   FILETIME& ft() { return time_.ft_; }
@@ -351,7 +356,7 @@ void Win32Time::SetToCurrentTime() {
 // Only times in the 32-bit Unix range may be passed to this function.
 // Also, adding the time-zone offset to the input must not overflow.
 // The function EquivalentTime() in date.js guarantees this.
-int64_t Win32Time::LocalOffset(TimezoneCache* cache) {
+int64_t Win32Time::LocalOffset(WindowsTimezoneCache* cache) {
   cache->InitializeIfNeeded();
 
   Win32Time rounded_to_second(*this);
@@ -385,7 +390,7 @@ int64_t Win32Time::LocalOffset(TimezoneCache* cache) {
 
 
 // Return whether or not daylight savings time is in effect at this time.
-bool Win32Time::InDST(TimezoneCache* cache) {
+bool Win32Time::InDST(WindowsTimezoneCache* cache) {
   cache->InitializeIfNeeded();
 
   // Determine if DST is in effect at the specified time.
@@ -410,14 +415,14 @@ bool Win32Time::InDST(TimezoneCache* cache) {
 
 
 // Return the daylight savings time offset for this time.
-int64_t Win32Time::DaylightSavingsOffset(TimezoneCache* cache) {
+int64_t Win32Time::DaylightSavingsOffset(WindowsTimezoneCache* cache) {
   return InDST(cache) ? 60 * kMsPerMinute : 0;
 }
 
 
 // Returns a string identifying the current timezone for the
 // timestamp taking into account daylight saving.
-char* Win32Time::LocalTimezone(TimezoneCache* cache) {
+char* Win32Time::LocalTimezone(WindowsTimezoneCache* cache) {
   // Return the standard or DST time zone name based on whether daylight
   // saving is in effect at the given time.
   return InDST(cache) ? cache->dst_tz_name_ : cache->std_tz_name_;
@@ -449,47 +454,30 @@ double OS::TimeCurrentMillis() {
   return Time::Now().ToJsTime();
 }
 
-
-TimezoneCache* OS::CreateTimezoneCache() {
-  return new TimezoneCache();
-}
-
-
-void OS::DisposeTimezoneCache(TimezoneCache* cache) {
-  delete cache;
-}
-
-
-void OS::ClearTimezoneCache(TimezoneCache* cache) {
-  cache->Clear();
-}
-
-
 // Returns a string identifying the current timezone taking into
 // account daylight saving.
-const char* OS::LocalTimezone(double time, TimezoneCache* cache) {
-  return Win32Time(time).LocalTimezone(cache);
+const char* WindowsTimezoneCache::LocalTimezone(double time) {
+  return Win32Time(time).LocalTimezone(this);
 }
-
 
 // Returns the local time offset in milliseconds east of UTC without
 // taking daylight savings time into account.
-double OS::LocalTimeOffset(TimezoneCache* cache) {
+double WindowsTimezoneCache::LocalTimeOffset() {
   // Use current time, rounded to the millisecond.
-  Win32Time t(TimeCurrentMillis());
+  Win32Time t(OS::TimeCurrentMillis());
   // Time::LocalOffset inlcudes any daylight savings offset, so subtract it.
-  return static_cast<double>(t.LocalOffset(cache) -
-                             t.DaylightSavingsOffset(cache));
+  return static_cast<double>(t.LocalOffset(this) -
+                             t.DaylightSavingsOffset(this));
 }
-
 
 // Returns the daylight savings offset in milliseconds for the given
 // time.
-double OS::DaylightSavingsOffset(double time, TimezoneCache* cache) {
-  int64_t offset = Win32Time(time).DaylightSavingsOffset(cache);
+double WindowsTimezoneCache::DaylightSavingsOffset(double time) {
+  int64_t offset = Win32Time(time).DaylightSavingsOffset(this);
   return static_cast<double>(offset);
 }
 
+TimezoneCache* OS::CreateTimezoneCache() { return new WindowsTimezoneCache(); }
 
 int OS::GetLastError() {
   return ::GetLastError();
@@ -574,6 +562,7 @@ bool OS::Remove(const char* path) {
   return (DeleteFileA(path) != 0);
 }
 
+char OS::DirectorySeparator() { return '\\'; }
 
 bool OS::isDirectorySeparator(const char ch) {
   return ch == '/' || ch == '\\';
@@ -751,9 +740,19 @@ void* OS::GetRandomMmapAddr() {
 
 static void* RandomizedVirtualAlloc(size_t size, int action, int protection) {
   LPVOID base = NULL;
+  static BOOL use_aslr = -1;
+#ifdef V8_HOST_ARCH_32_BIT
+  // Don't bother randomizing on 32-bit hosts, because they lack the room and
+  // don't have viable ASLR anyway.
+  if (use_aslr == -1 && !IsWow64Process(GetCurrentProcess(), &use_aslr))
+    use_aslr = FALSE;
+#else
+  use_aslr = TRUE;
+#endif
 
-  if (protection == PAGE_EXECUTE_READWRITE || protection == PAGE_NOACCESS) {
-    // For exectutable pages try and randomize the allocation address
+  if (use_aslr &&
+      (protection == PAGE_EXECUTE_READWRITE || protection == PAGE_NOACCESS)) {
+    // For executable pages try and randomize the allocation address
     for (size_t attempts = 0; base == NULL && attempts < 3; ++attempts) {
       base = VirtualAlloc(OS::GetRandomMmapAddr(), size, action, protection);
     }
@@ -765,15 +764,34 @@ static void* RandomizedVirtualAlloc(size_t size, int action, int protection) {
   return base;
 }
 
-
-void* OS::Allocate(const size_t requested,
-                   size_t* allocated,
+void* OS::Allocate(const size_t requested, size_t* allocated,
                    bool is_executable) {
+  return OS::Allocate(requested, allocated,
+                      is_executable ? OS::MemoryPermission::kReadWriteExecute
+                                    : OS::MemoryPermission::kReadWrite);
+}
+
+void* OS::Allocate(const size_t requested, size_t* allocated,
+                   OS::MemoryPermission access) {
   // VirtualAlloc rounds allocated size to page size automatically.
   size_t msize = RoundUp(requested, static_cast<int>(GetPageSize()));
 
   // Windows XP SP2 allows Data Excution Prevention (DEP).
-  int prot = is_executable ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+  int prot = PAGE_NOACCESS;
+  switch (access) {
+    case OS::MemoryPermission::kNoAccess: {
+      prot = PAGE_NOACCESS;
+      break;
+    }
+    case OS::MemoryPermission::kReadWrite: {
+      prot = PAGE_READWRITE;
+      break;
+    }
+    case OS::MemoryPermission::kReadWriteExecute: {
+      prot = PAGE_EXECUTE_READWRITE;
+      break;
+    }
+  }
 
   LPVOID mbase = RandomizedVirtualAlloc(msize,
                                         MEM_COMMIT | MEM_RESERVE,
@@ -787,6 +805,9 @@ void* OS::Allocate(const size_t requested,
   return mbase;
 }
 
+void* OS::AllocateGuarded(const size_t requested) {
+  return VirtualAlloc(nullptr, requested, MEM_RESERVE, PAGE_NOACCESS);
+}
 
 void OS::Free(void* address, const size_t size) {
   // TODO(1240712): VirtualFree has a return value which is ignored here.
@@ -811,6 +832,11 @@ void OS::Guard(void* address, const size_t size) {
   VirtualProtect(address, size, PAGE_NOACCESS, &oldprotect);
 }
 
+void OS::Unprotect(void* address, const size_t size) {
+  LPVOID result = VirtualAlloc(address, size, MEM_COMMIT, PAGE_READWRITE);
+  DCHECK_IMPLIES(result != nullptr, GetLastError() == 0);
+  USE(result);
+}
 
 void OS::Sleep(TimeDelta interval) {
   ::Sleep(static_cast<DWORD>(interval.InMilliseconds()));
@@ -823,6 +849,9 @@ void OS::Abort() {
   }
   // Make the MSVCRT do a silent abort.
   raise(SIGABRT);
+
+  // Make sure function doesn't return.
+  abort();
 }
 
 
@@ -1133,9 +1162,9 @@ static std::vector<OS::SharedLibraryAddress> LoadSymbols(
     WideCharToMultiByte(CP_UTF8, 0, module_entry.szExePath, -1, &lib_name[0],
                         lib_name_length, NULL, NULL);
     result.push_back(OS::SharedLibraryAddress(
-        lib_name, reinterpret_cast<unsigned int>(module_entry.modBaseAddr),
-        reinterpret_cast<unsigned int>(module_entry.modBaseAddr +
-                                       module_entry.modBaseSize)));
+        lib_name, reinterpret_cast<uintptr_t>(module_entry.modBaseAddr),
+        reinterpret_cast<uintptr_t>(module_entry.modBaseAddr +
+                                    module_entry.modBaseSize)));
     cont = _Module32NextW(snapshot, &module_entry);
   }
   CloseHandle(snapshot);
@@ -1276,6 +1305,10 @@ bool VirtualMemory::UncommitRegion(void* base, size_t size) {
   return VirtualFree(base, size, MEM_DECOMMIT) != 0;
 }
 
+bool VirtualMemory::ReleasePartialRegion(void* base, size_t size,
+                                         void* free_start, size_t free_size) {
+  return VirtualFree(free_start, free_size, MEM_DECOMMIT) != 0;
+}
 
 bool VirtualMemory::ReleaseRegion(void* base, size_t size) {
   return VirtualFree(base, 0, MEM_RELEASE) != 0;

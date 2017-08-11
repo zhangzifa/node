@@ -115,7 +115,7 @@ assertEquals(20, a.length);
 
 var o = { length: -23 };
 Array.prototype.pop.apply(o);
-assertEquals(4294967272, o.length);
+assertEquals(0, o.length);
 
 // Check case of compiled stubs.
 var a = [];
@@ -131,4 +131,31 @@ for (var i = 0; i < 7; i++) {
   "use strict";
   var frozen_object = Object.freeze({__proto__:[]});
   assertThrows(function () { frozen_object.length = 10 });
+})();
+
+(function sloppyReentrantDescriptorChange() {
+  var b = [];
+  b.length = {
+    valueOf() {
+      Object.defineProperty(b, "length", {writable: false});
+      return 1;
+    }
+  };
+  assertEquals(0, b.length);
+})();
+
+(function strictReentrantDescriptorChange() {
+  var b = [];
+  assertThrows(() => {
+    "use strict";
+    b.length = {
+      valueOf() {
+        Object.defineProperty(b, "length", {writable: false});
+        return 1;
+      }
+    };
+  }, TypeError);
+
+  b.length = { valueOf() { return 0; } };
+  assertEquals(0, b.length);
 })();

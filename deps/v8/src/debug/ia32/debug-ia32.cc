@@ -4,8 +4,10 @@
 
 #if V8_TARGET_ARCH_IA32
 
-#include "src/codegen.h"
 #include "src/debug/debug.h"
+
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
 #include "src/ia32/frames-ia32.h"
 
 namespace v8 {
@@ -23,24 +25,24 @@ void EmitDebugBreakSlot(MacroAssembler* masm) {
 }
 
 
-void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode,
-                                int call_argc) {
+void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode) {
   // Generate enough nop's to make space for a call instruction.
-  masm->RecordDebugBreakSlot(mode, call_argc);
+  masm->RecordDebugBreakSlot(mode);
   EmitDebugBreakSlot(masm);
 }
 
 
-void DebugCodegen::ClearDebugBreakSlot(Address pc) {
-  CodePatcher patcher(pc, Assembler::kDebugBreakSlotLength);
+void DebugCodegen::ClearDebugBreakSlot(Isolate* isolate, Address pc) {
+  CodePatcher patcher(isolate, pc, Assembler::kDebugBreakSlotLength);
   EmitDebugBreakSlot(patcher.masm());
 }
 
 
-void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
-  DCHECK_EQ(Code::BUILTIN, code->kind());
+void DebugCodegen::PatchDebugBreakSlot(Isolate* isolate, Address pc,
+                                       Handle<Code> code) {
+  DCHECK(code->is_debug_stub());
   static const int kSize = Assembler::kDebugBreakSlotLength;
-  CodePatcher patcher(pc, kSize);
+  CodePatcher patcher(isolate, pc, kSize);
 
   // Add a label for checking the size of the code used for returning.
   Label check_codesize;
@@ -50,6 +52,9 @@ void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
   DCHECK_EQ(kSize, patcher.masm()->SizeOfCodeGeneratedSince(&check_codesize));
 }
 
+bool DebugCodegen::DebugBreakSlotIsPatched(Address pc) {
+  return !Assembler::IsNop(pc);
+}
 
 void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
                                           DebugBreakCallHelperMode mode) {
@@ -59,15 +64,15 @@ void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
   {
     FrameScope scope(masm, StackFrame::INTERNAL);
 
-    // Load padding words on stack.
-    for (int i = 0; i < LiveEdit::kFramePaddingInitialSize; i++) {
-      __ push(Immediate(Smi::FromInt(LiveEdit::kFramePaddingValue)));
+    // Push arguments for DebugBreak call.
+    if (mode == SAVE_RESULT_REGISTER) {
+      // Break on return.
+      __ push(eax);
+    } else {
+      // Non-return breaks.
+      __ Push(masm->isolate()->factory()->the_hole_value());
     }
-    __ push(Immediate(Smi::FromInt(LiveEdit::kFramePaddingInitialSize)));
-
-    if (mode == SAVE_RESULT_REGISTER) __ push(eax);
-
-    __ Move(eax, Immediate(0));  // No arguments.
+    __ Move(eax, Immediate(1));
     __ mov(ebx,
            Immediate(ExternalReference(
                Runtime::FunctionForId(Runtime::kDebugBreak), masm->isolate())));
@@ -78,60 +83,50 @@ void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
     if (FLAG_debug_code) {
       for (int i = 0; i < kNumJSCallerSaved; ++i) {
         Register reg = {JSCallerSavedCode(i)};
-        __ Move(reg, Immediate(kDebugZapValue));
+        // Do not clobber eax if mode is SAVE_RESULT_REGISTER. It will
+        // contain return value of the function.
+        if (!(reg.is(eax) && (mode == SAVE_RESULT_REGISTER))) {
+          __ Move(reg, Immediate(kDebugZapValue));
+        }
       }
     }
-
-    if (mode == SAVE_RESULT_REGISTER) __ pop(eax);
-
-    __ pop(ebx);
-    // We divide stored value by 2 (untagging) and multiply it by word's size.
-    STATIC_ASSERT(kSmiTagSize == 1 && kSmiShiftSize == 0);
-    __ lea(esp, Operand(esp, ebx, times_half_pointer_size, 0));
-
     // Get rid of the internal frame.
   }
 
-  // This call did not replace a call , so there will be an unwanted
-  // return address left on the stack. Here we get rid of that.
-  __ add(esp, Immediate(kPointerSize));
+  __ MaybeDropFrames();
 
-  // Now that the break point has been handled, resume normal execution by
-  // jumping to the target address intended by the caller and that was
-  // overwritten by the address of DebugBreakXXX.
-  ExternalReference after_break_target =
-      ExternalReference::debug_after_break_target_address(masm->isolate());
-  __ jmp(Operand::StaticVariable(after_break_target));
+  // Return to caller.
+  __ ret(0);
 }
 
+void DebugCodegen::GenerateHandleDebuggerStatement(MacroAssembler* masm) {
+  {
+    FrameScope scope(masm, StackFrame::INTERNAL);
+    __ CallRuntime(Runtime::kHandleDebuggerStatement, 0);
+  }
+  __ MaybeDropFrames();
 
-void DebugCodegen::GeneratePlainReturnLiveEdit(MacroAssembler* masm) {
-  masm->ret(0);
+  // Return to caller.
+  __ ret(0);
 }
 
+void DebugCodegen::GenerateFrameDropperTrampoline(MacroAssembler* masm) {
+  // Frame is being dropped:
+  // - Drop to the target frame specified by ebx.
+  // - Look up current function on the frame.
+  // - Leave the frame.
+  // - Restart the frame by calling the function.
+  __ mov(ebp, ebx);
+  __ mov(edi, Operand(ebp, JavaScriptFrameConstants::kFunctionOffset));
+  __ leave();
 
-void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
-  ExternalReference restarter_frame_function_slot =
-      ExternalReference::debug_restarter_frame_function_pointer_address(
-          masm->isolate());
-  __ mov(Operand::StaticVariable(restarter_frame_function_slot), Immediate(0));
+  __ mov(ebx, FieldOperand(edi, JSFunction::kSharedFunctionInfoOffset));
+  __ mov(ebx,
+         FieldOperand(ebx, SharedFunctionInfo::kFormalParameterCountOffset));
 
-  // We do not know our frame height, but set esp based on ebp.
-  __ lea(esp, Operand(ebp, -1 * kPointerSize));
-
-  __ pop(edi);  // Function.
-  __ pop(ebp);
-
-  // Load context from the function.
-  __ mov(esi, FieldOperand(edi, JSFunction::kContextOffset));
-
-  // Get function code.
-  __ mov(edx, FieldOperand(edi, JSFunction::kSharedFunctionInfoOffset));
-  __ mov(edx, FieldOperand(edx, SharedFunctionInfo::kCodeOffset));
-  __ lea(edx, FieldOperand(edx, Code::kHeaderSize));
-
-  // Re-run JSFunction, edi is function, esi is context.
-  __ jmp(edx);
+  ParameterCount dummy(ebx);
+  __ InvokeFunction(edi, dummy, dummy, JUMP_FUNCTION,
+                    CheckDebugStepCallWrapper());
 }
 
 

@@ -18,21 +18,11 @@ function test() {
   assertFalse(%_IsSmi(1.1));
   assertFalse(%_IsSmi({}));
 
-  assertTrue(%_IsRegExp(/regexp/));
-  assertFalse(%_IsRegExp({}));
-
   assertTrue(%_IsArray([1]));
   assertFalse(%_IsArray(function() {}));
 
-  assertTrue(%_IsFunction(function() {}));
-  assertFalse(%_IsFunction(null));
-
-  assertTrue(%_IsSpecObject(new Date()));
-  assertFalse(%_IsSpecObject(1));
-
-  assertTrue(%_IsMinusZero(-0.0));
-  assertFalse(%_IsMinusZero(1));
-  assertFalse(%_IsMinusZero(""));
+  assertTrue(%_IsJSReceiver(new Date()));
+  assertFalse(%_IsJSReceiver(1));
 }
 
 

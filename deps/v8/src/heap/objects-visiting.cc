@@ -4,21 +4,20 @@
 
 #include "src/heap/objects-visiting.h"
 
+#include "src/heap/heap-inl.h"
 #include "src/heap/mark-compact-inl.h"
 #include "src/heap/objects-visiting-inl.h"
 
 namespace v8 {
 namespace internal {
 
-
-StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(Map* map) {
+VisitorId StaticVisitorBase::GetVisitorId(Map* map) {
   return GetVisitorId(map->instance_type(), map->instance_size(),
                       FLAG_unbox_double_fields && !map->HasFastPointerLayout());
 }
 
-
-StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
-    int instance_type, int instance_size, bool has_unboxed_fields) {
+VisitorId StaticVisitorBase::GetVisitorId(int instance_type, int instance_size,
+                                          bool has_unboxed_fields) {
   if (instance_type < FIRST_NONSTRING_TYPE) {
     switch (instance_type & kStringRepresentationMask) {
       case kSeqStringTag:
@@ -39,8 +38,10 @@ StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
         return kVisitSlicedString;
 
       case kExternalStringTag:
-        return GetVisitorIdForSize(kVisitDataObject, kVisitDataObjectGeneric,
-                                   instance_size, has_unboxed_fields);
+        return kVisitDataObject;
+
+      case kThinStringTag:
+        return kVisitThinString;
     }
     UNREACHABLE();
   }
@@ -79,13 +80,8 @@ StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
     case WEAK_CELL_TYPE:
       return kVisitWeakCell;
 
-    case JS_SET_TYPE:
-      return GetVisitorIdForSize(kVisitStruct, kVisitStructGeneric,
-                                 JSSet::kSize, has_unboxed_fields);
-
-    case JS_MAP_TYPE:
-      return GetVisitorIdForSize(kVisitStruct, kVisitStructGeneric,
-                                 JSMap::kSize, has_unboxed_fields);
+    case TRANSITION_ARRAY_TYPE:
+      return kVisitTransitionArray;
 
     case JS_WEAK_MAP_TYPE:
     case JS_WEAK_SET_TYPE:
@@ -98,57 +94,88 @@ StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
       return kVisitSharedFunctionInfo;
 
     case JS_PROXY_TYPE:
-      return GetVisitorIdForSize(kVisitStruct, kVisitStructGeneric,
-                                 JSProxy::kSize, has_unboxed_fields);
-
-    case JS_FUNCTION_PROXY_TYPE:
-      return GetVisitorIdForSize(kVisitStruct, kVisitStructGeneric,
-                                 JSFunctionProxy::kSize, has_unboxed_fields);
-
-    case FOREIGN_TYPE:
-      return GetVisitorIdForSize(kVisitDataObject, kVisitDataObjectGeneric,
-                                 Foreign::kSize, has_unboxed_fields);
+      return kVisitStruct;
 
     case SYMBOL_TYPE:
       return kVisitSymbol;
 
-    case FILLER_TYPE:
-      return kVisitDataObjectGeneric;
-
     case JS_ARRAY_BUFFER_TYPE:
       return kVisitJSArrayBuffer;
 
-    case JS_TYPED_ARRAY_TYPE:
-      return kVisitJSTypedArray;
-
-    case JS_DATA_VIEW_TYPE:
-      return kVisitJSDataView;
-
     case JS_OBJECT_TYPE:
+    case JS_ERROR_TYPE:
+    case JS_ARGUMENTS_TYPE:
+    case JS_ASYNC_FROM_SYNC_ITERATOR_TYPE:
     case JS_CONTEXT_EXTENSION_OBJECT_TYPE:
     case JS_GENERATOR_OBJECT_TYPE:
-    case JS_MODULE_TYPE:
+    case JS_ASYNC_GENERATOR_OBJECT_TYPE:
+    case JS_MODULE_NAMESPACE_TYPE:
     case JS_VALUE_TYPE:
     case JS_DATE_TYPE:
     case JS_ARRAY_TYPE:
     case JS_GLOBAL_PROXY_TYPE:
     case JS_GLOBAL_OBJECT_TYPE:
-    case JS_BUILTINS_OBJECT_TYPE:
     case JS_MESSAGE_OBJECT_TYPE:
+    case JS_TYPED_ARRAY_TYPE:
+    case JS_DATA_VIEW_TYPE:
+    case JS_SET_TYPE:
+    case JS_MAP_TYPE:
     case JS_SET_ITERATOR_TYPE:
     case JS_MAP_ITERATOR_TYPE:
-    case JS_ITERATOR_RESULT_TYPE:
-      return GetVisitorIdForSize(kVisitJSObject, kVisitJSObjectGeneric,
-                                 instance_size, has_unboxed_fields);
+    case JS_STRING_ITERATOR_TYPE:
+
+    case JS_TYPED_ARRAY_KEY_ITERATOR_TYPE:
+    case JS_FAST_ARRAY_KEY_ITERATOR_TYPE:
+    case JS_GENERIC_ARRAY_KEY_ITERATOR_TYPE:
+    case JS_UINT8_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_INT8_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_UINT16_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_INT16_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_UINT32_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_INT32_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FLOAT32_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FLOAT64_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_UINT8_CLAMPED_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_SMI_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_SMI_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_DOUBLE_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_DOUBLE_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_GENERIC_ARRAY_KEY_VALUE_ITERATOR_TYPE:
+    case JS_UINT8_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_INT8_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_UINT16_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_INT16_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_UINT32_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_INT32_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FLOAT32_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FLOAT64_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_UINT8_CLAMPED_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_SMI_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_SMI_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_DOUBLE_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_FAST_HOLEY_DOUBLE_ARRAY_VALUE_ITERATOR_TYPE:
+    case JS_GENERIC_ARRAY_VALUE_ITERATOR_TYPE:
+
+    case JS_PROMISE_CAPABILITY_TYPE:
+    case JS_PROMISE_TYPE:
+    case JS_BOUND_FUNCTION_TYPE:
+      return has_unboxed_fields ? kVisitJSObject : kVisitJSObjectFast;
+    case JS_API_OBJECT_TYPE:
+    case JS_SPECIAL_API_OBJECT_TYPE:
+      return kVisitJSApiObject;
 
     case JS_FUNCTION_TYPE:
       return kVisitJSFunction;
 
+    case FILLER_TYPE:
+    case FOREIGN_TYPE:
     case HEAP_NUMBER_TYPE:
     case MUTABLE_HEAP_NUMBER_TYPE:
-    case SIMD128_VALUE_TYPE:
-      return GetVisitorIdForSize(kVisitDataObject, kVisitDataObjectGeneric,
-                                 instance_size, has_unboxed_fields);
+      return kVisitDataObject;
 
     case FIXED_UINT8_ARRAY_TYPE:
     case FIXED_INT8_ARRAY_TYPE:
@@ -158,7 +185,7 @@ StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
     case FIXED_INT32_ARRAY_TYPE:
     case FIXED_FLOAT32_ARRAY_TYPE:
     case FIXED_UINT8_CLAMPED_ARRAY_TYPE:
-      return kVisitFixedTypedArray;
+      return kVisitFixedTypedArrayBase;
 
     case FIXED_FLOAT64_ARRAY_TYPE:
       return kVisitFixedFloat64Array;
@@ -170,146 +197,11 @@ StaticVisitorBase::VisitorId StaticVisitorBase::GetVisitorId(
         return kVisitAllocationSite;
       }
 
-      return GetVisitorIdForSize(kVisitStruct, kVisitStructGeneric,
-                                 instance_size, has_unboxed_fields);
+      return kVisitStruct;
 
     default:
       UNREACHABLE();
       return kVisitorIdCount;
-  }
-}
-
-
-void HeapObject::IterateBody(InstanceType type, int object_size,
-                             ObjectVisitor* v) {
-  // Avoiding <Type>::cast(this) because it accesses the map pointer field.
-  // During GC, the map pointer field is encoded.
-  if (type < FIRST_NONSTRING_TYPE) {
-    switch (type & kStringRepresentationMask) {
-      case kSeqStringTag:
-        break;
-      case kConsStringTag:
-        ConsString::BodyDescriptor::IterateBody(this, v);
-        break;
-      case kSlicedStringTag:
-        SlicedString::BodyDescriptor::IterateBody(this, v);
-        break;
-      case kExternalStringTag:
-        if ((type & kStringEncodingMask) == kOneByteStringTag) {
-          reinterpret_cast<ExternalOneByteString*>(this)
-              ->ExternalOneByteStringIterateBody(v);
-        } else {
-          reinterpret_cast<ExternalTwoByteString*>(this)
-              ->ExternalTwoByteStringIterateBody(v);
-        }
-        break;
-    }
-    return;
-  }
-
-  switch (type) {
-    case FIXED_ARRAY_TYPE:
-      FixedArray::BodyDescriptor::IterateBody(this, object_size, v);
-      break;
-    case FIXED_DOUBLE_ARRAY_TYPE:
-      break;
-    case JS_OBJECT_TYPE:
-    case JS_CONTEXT_EXTENSION_OBJECT_TYPE:
-    case JS_GENERATOR_OBJECT_TYPE:
-    case JS_MODULE_TYPE:
-    case JS_VALUE_TYPE:
-    case JS_DATE_TYPE:
-    case JS_ARRAY_TYPE:
-    case JS_TYPED_ARRAY_TYPE:
-    case JS_DATA_VIEW_TYPE:
-    case JS_SET_TYPE:
-    case JS_MAP_TYPE:
-    case JS_SET_ITERATOR_TYPE:
-    case JS_MAP_ITERATOR_TYPE:
-    case JS_ITERATOR_RESULT_TYPE:
-    case JS_WEAK_MAP_TYPE:
-    case JS_WEAK_SET_TYPE:
-    case JS_REGEXP_TYPE:
-    case JS_GLOBAL_PROXY_TYPE:
-    case JS_GLOBAL_OBJECT_TYPE:
-    case JS_BUILTINS_OBJECT_TYPE:
-    case JS_MESSAGE_OBJECT_TYPE:
-      JSObject::BodyDescriptor::IterateBody(this, object_size, v);
-      break;
-    case JS_ARRAY_BUFFER_TYPE:
-      JSArrayBuffer::JSArrayBufferIterateBody(this, v);
-      break;
-    case JS_FUNCTION_TYPE:
-      reinterpret_cast<JSFunction*>(this)
-          ->JSFunctionIterateBody(object_size, v);
-      break;
-    case ODDBALL_TYPE:
-      Oddball::BodyDescriptor::IterateBody(this, v);
-      break;
-    case JS_PROXY_TYPE:
-      JSProxy::BodyDescriptor::IterateBody(this, v);
-      break;
-    case JS_FUNCTION_PROXY_TYPE:
-      JSFunctionProxy::BodyDescriptor::IterateBody(this, v);
-      break;
-    case FOREIGN_TYPE:
-      reinterpret_cast<Foreign*>(this)->ForeignIterateBody(v);
-      break;
-    case MAP_TYPE:
-      Map::BodyDescriptor::IterateBody(this, v);
-      break;
-    case CODE_TYPE:
-      reinterpret_cast<Code*>(this)->CodeIterateBody(v);
-      break;
-    case CELL_TYPE:
-      Cell::BodyDescriptor::IterateBody(this, v);
-      break;
-    case PROPERTY_CELL_TYPE:
-      PropertyCell::BodyDescriptor::IterateBody(this, v);
-      break;
-    case WEAK_CELL_TYPE:
-      WeakCell::BodyDescriptor::IterateBody(this, v);
-      break;
-    case SYMBOL_TYPE:
-      Symbol::BodyDescriptor::IterateBody(this, v);
-      break;
-    case BYTECODE_ARRAY_TYPE:
-      reinterpret_cast<BytecodeArray*>(this)->BytecodeArrayIterateBody(v);
-      break;
-
-    case HEAP_NUMBER_TYPE:
-    case MUTABLE_HEAP_NUMBER_TYPE:
-    case SIMD128_VALUE_TYPE:
-    case FILLER_TYPE:
-    case BYTE_ARRAY_TYPE:
-    case FREE_SPACE_TYPE:
-      break;
-
-#define TYPED_ARRAY_CASE(Type, type, TYPE, ctype, size) \
-  case FIXED_##TYPE##_ARRAY_TYPE:                       \
-    reinterpret_cast<FixedTypedArrayBase*>(this)        \
-        ->FixedTypedArrayBaseIterateBody(v);            \
-    break;
-      TYPED_ARRAYS(TYPED_ARRAY_CASE)
-#undef TYPED_ARRAY_CASE
-
-    case SHARED_FUNCTION_INFO_TYPE: {
-      SharedFunctionInfo::BodyDescriptor::IterateBody(this, v);
-      break;
-    }
-
-#define MAKE_STRUCT_CASE(NAME, Name, name) case NAME##_TYPE:
-      STRUCT_LIST(MAKE_STRUCT_CASE)
-#undef MAKE_STRUCT_CASE
-      if (type == ALLOCATION_SITE_TYPE) {
-        AllocationSite::BodyDescriptor::IterateBody(this, v);
-      } else {
-        StructBodyDescriptor::IterateBody(this, object_size, v);
-      }
-      break;
-    default:
-      PrintF("Unknown type: %d\n", type);
-      UNREACHABLE();
   }
 }
 
@@ -356,7 +248,7 @@ Object* VisitWeakList(Heap* heap, Object* list, WeakObjectRetainer* retainer) {
         }
       }
       // Retained object is new tail.
-      DCHECK(!retained->IsUndefined());
+      DCHECK(!retained->IsUndefined(heap->isolate()));
       candidate = reinterpret_cast<T*>(retained);
       tail = candidate;
 
@@ -429,7 +321,7 @@ struct WeakListVisitor<Context> {
   }
 
   static Object* WeakNext(Context* context) {
-    return context->get(Context::NEXT_CONTEXT_LINK);
+    return context->next_context_link();
   }
 
   static int WeakNextOffset() {
@@ -442,9 +334,17 @@ struct WeakListVisitor<Context> {
     DoWeakList<JSFunction>(heap, context, retainer,
                            Context::OPTIMIZED_FUNCTIONS_LIST);
 
-    // Code objects are always allocated in Code space, we do not have to visit
-    // them during scavenges.
     if (heap->gc_state() == Heap::MARK_COMPACT) {
+      // Record the slots of the weak entries in the native context.
+      MarkCompactCollector* collector = heap->mark_compact_collector();
+      for (int idx = Context::FIRST_WEAK_SLOT;
+           idx < Context::NATIVE_CONTEXT_SLOTS; ++idx) {
+        Object** slot = Context::cast(context)->RawFieldOfElementAt(idx);
+        collector->RecordSlot(context, slot, *slot);
+      }
+      // Code objects are always allocated in Code space, we do not have to
+      // visit
+      // them during scavenges.
       DoWeakList<Code>(heap, context, retainer, Context::OPTIMIZED_CODE_LIST);
       DoWeakList<Code>(heap, context, retainer, Context::DEOPTIMIZED_CODE_LIST);
     }

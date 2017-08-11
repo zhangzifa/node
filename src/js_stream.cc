@@ -12,18 +12,18 @@ namespace node {
 
 using v8::Array;
 using v8::Context;
-using v8::External;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Local;
+using v8::MaybeLocal;
 using v8::Object;
 using v8::Value;
 
 
-JSStream::JSStream(Environment* env, Local<Object> obj, AsyncWrap* parent)
-    : StreamBase(env),
-      AsyncWrap(env, obj, AsyncWrap::PROVIDER_JSSTREAM, parent) {
+JSStream::JSStream(Environment* env, Local<Object> obj)
+    : AsyncWrap(env, obj, AsyncWrap::PROVIDER_JSSTREAM),
+      StreamBase(env) {
   node::Wrap(obj, this);
   MakeWeak<JSStream>(this);
 }
@@ -47,22 +47,26 @@ bool JSStream::IsAlive() {
   v8::Local<v8::Value> fn = object()->Get(env()->isalive_string());
   if (!fn->IsFunction())
     return false;
-  return MakeCallback(fn.As<v8::Function>(), 0, nullptr)->IsTrue();
+  return MakeCallback(fn.As<v8::Function>(), 0, nullptr)
+      .ToLocalChecked()->IsTrue();
 }
 
 
 bool JSStream::IsClosing() {
-  return MakeCallback(env()->isclosing_string(), 0, nullptr)->IsTrue();
+  return MakeCallback(env()->isclosing_string(), 0, nullptr)
+      .ToLocalChecked()->IsTrue();
 }
 
 
 int JSStream::ReadStart() {
-  return MakeCallback(env()->onreadstart_string(), 0, nullptr)->Int32Value();
+  return MakeCallback(env()->onreadstart_string(), 0, nullptr)
+      .ToLocalChecked()->Int32Value();
 }
 
 
 int JSStream::ReadStop() {
-  return MakeCallback(env()->onreadstop_string(), 0, nullptr)->Int32Value();
+  return MakeCallback(env()->onreadstop_string(), 0, nullptr)
+      .ToLocalChecked()->Int32Value();
 }
 
 
@@ -74,10 +78,10 @@ int JSStream::DoShutdown(ShutdownWrap* req_wrap) {
   };
 
   req_wrap->Dispatched();
-  Local<Value> res =
-      MakeCallback(env()->onshutdown_string(), ARRAY_SIZE(argv), argv);
+  MaybeLocal<Value> res =
+      MakeCallback(env()->onshutdown_string(), arraysize(argv), argv);
 
-  return res->Int32Value();
+  return res.ToLocalChecked()->Int32Value();
 }
 
 
@@ -102,10 +106,10 @@ int JSStream::DoWrite(WriteWrap* w,
   };
 
   w->Dispatched();
-  Local<Value> res =
-      MakeCallback(env()->onwrite_string(), ARRAY_SIZE(argv), argv);
+  MaybeLocal<Value> res =
+      MakeCallback(env()->onwrite_string(), arraysize(argv), argv);
 
-  return res->Int32Value();
+  return res.ToLocalChecked()->Int32Value();
 }
 
 
@@ -115,17 +119,7 @@ void JSStream::New(const FunctionCallbackInfo<Value>& args) {
   // normal function.
   CHECK(args.IsConstructCall());
   Environment* env = Environment::GetCurrent(args);
-  JSStream* wrap;
-
-  if (args.Length() == 0) {
-    wrap = new JSStream(env, args.This(), nullptr);
-  } else if (args[0]->IsExternal()) {
-    void* ptr = args[0].As<External>()->Value();
-    wrap = new JSStream(env, args.This(), static_cast<AsyncWrap*>(ptr));
-  } else {
-    UNREACHABLE();
-  }
-  CHECK(wrap);
+  new JSStream(env, args.This());
 }
 
 
@@ -135,7 +129,8 @@ static void FreeCallback(char* data, void* hint) {
 
 
 void JSStream::DoAlloc(const FunctionCallbackInfo<Value>& args) {
-  JSStream* wrap = Unwrap<JSStream>(args.Holder());
+  JSStream* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
   uv_buf_t buf;
   wrap->OnAlloc(args[0]->Int32Value(), &buf);
@@ -150,7 +145,8 @@ void JSStream::DoAlloc(const FunctionCallbackInfo<Value>& args) {
 
 
 void JSStream::DoRead(const FunctionCallbackInfo<Value>& args) {
-  JSStream* wrap = Unwrap<JSStream>(args.Holder());
+  JSStream* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
   CHECK(Buffer::HasInstance(args[1]));
   uv_buf_t buf = uv_buf_init(Buffer::Data(args[1]), Buffer::Length(args[1]));
@@ -159,8 +155,11 @@ void JSStream::DoRead(const FunctionCallbackInfo<Value>& args) {
 
 
 void JSStream::DoAfterWrite(const FunctionCallbackInfo<Value>& args) {
-  JSStream* wrap = Unwrap<JSStream>(args.Holder());
-  WriteWrap* w = Unwrap<WriteWrap>(args[0].As<Object>());
+  JSStream* wrap;
+  CHECK(args[0]->IsObject());
+  WriteWrap* w;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&w, args[0].As<Object>());
 
   wrap->OnAfterWrite(w);
 }
@@ -168,14 +167,17 @@ void JSStream::DoAfterWrite(const FunctionCallbackInfo<Value>& args) {
 
 template <class Wrap>
 void JSStream::Finish(const FunctionCallbackInfo<Value>& args) {
-  Wrap* w = Unwrap<Wrap>(args[0].As<Object>());
+  Wrap* w;
+  CHECK(args[0]->IsObject());
+  ASSIGN_OR_RETURN_UNWRAP(&w, args[0].As<Object>());
 
   w->Done(args[1]->Int32Value());
 }
 
 
 void JSStream::ReadBuffer(const FunctionCallbackInfo<Value>& args) {
-  JSStream* wrap = Unwrap<JSStream>(args.Holder());
+  JSStream* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
   CHECK(Buffer::HasInstance(args[0]));
   char* data = Buffer::Data(args[0]);
@@ -197,7 +199,8 @@ void JSStream::ReadBuffer(const FunctionCallbackInfo<Value>& args) {
 
 
 void JSStream::EmitEOF(const FunctionCallbackInfo<Value>& args) {
-  JSStream* wrap = Unwrap<JSStream>(args.Holder());
+  JSStream* wrap;
+  ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
   wrap->OnRead(UV_EOF, nullptr);
 }
@@ -211,6 +214,8 @@ void JSStream::Initialize(Local<Object> target,
   Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
   t->SetClassName(FIXED_ONE_BYTE_STRING(env->isolate(), "JSStream"));
   t->InstanceTemplate()->SetInternalFieldCount(1);
+
+  env->SetProtoMethod(t, "getAsyncId", AsyncWrap::GetAsyncId);
 
   env->SetProtoMethod(t, "doAlloc", DoAlloc);
   env->SetProtoMethod(t, "doRead", DoRead);

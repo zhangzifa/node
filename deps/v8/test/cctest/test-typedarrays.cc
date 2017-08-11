@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// TODO(mythria): Remove this define after this flag is turned on globally
-#define V8_IMMINENT_DEPRECATION_WARNINGS
-
 #include <stdlib.h>
 
 #include "src/v8.h"
@@ -12,6 +9,7 @@
 
 #include "src/api.h"
 #include "src/heap/heap.h"
+#include "src/objects-inl.h"
 #include "src/objects.h"
 
 using namespace v8::internal;

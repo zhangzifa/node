@@ -1,60 +1,63 @@
 'use strict';
 // Flags: --expose_internals
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
-const internalUtil = require('internal/util');
-const spawnSync = require('child_process').spawnSync;
+const fixtures = require('../common/fixtures');
 
-function getHiddenValue(obj, name) {
+const binding = process.binding('util');
+const kArrowMessagePrivateSymbolIndex = binding['arrow_message_private_symbol'];
+
+function getHiddenValue(obj, index) {
   return function() {
-    internalUtil.getHiddenValue(obj, name);
+    binding.getHiddenValue(obj, index);
   };
 }
 
-function setHiddenValue(obj, name, val) {
+function setHiddenValue(obj, index, val) {
   return function() {
-    internalUtil.setHiddenValue(obj, name, val);
+    binding.setHiddenValue(obj, index, val);
   };
 }
 
-assert.throws(getHiddenValue(), /obj must be an object/);
-assert.throws(getHiddenValue(null, 'foo'), /obj must be an object/);
-assert.throws(getHiddenValue(undefined, 'foo'), /obj must be an object/);
-assert.throws(getHiddenValue('bar', 'foo'), /obj must be an object/);
-assert.throws(getHiddenValue(85, 'foo'), /obj must be an object/);
-assert.throws(getHiddenValue({}), /name must be a string/);
-assert.throws(getHiddenValue({}, null), /name must be a string/);
-assert.throws(getHiddenValue({}, []), /name must be a string/);
-assert.deepEqual(internalUtil.getHiddenValue({}, 'foo'), undefined);
+const errMessageObj = /obj must be an object/;
+const errMessageIndex = /index must be an uint32/;
 
-assert.throws(setHiddenValue(), /obj must be an object/);
-assert.throws(setHiddenValue(null, 'foo'), /obj must be an object/);
-assert.throws(setHiddenValue(undefined, 'foo'), /obj must be an object/);
-assert.throws(setHiddenValue('bar', 'foo'), /obj must be an object/);
-assert.throws(setHiddenValue(85, 'foo'), /obj must be an object/);
-assert.throws(setHiddenValue({}), /name must be a string/);
-assert.throws(setHiddenValue({}, null), /name must be a string/);
-assert.throws(setHiddenValue({}, []), /name must be a string/);
+assert.throws(getHiddenValue(), errMessageObj);
+assert.throws(getHiddenValue(null, 'foo'), errMessageObj);
+assert.throws(getHiddenValue(undefined, 'foo'), errMessageObj);
+assert.throws(getHiddenValue('bar', 'foo'), errMessageObj);
+assert.throws(getHiddenValue(85, 'foo'), errMessageObj);
+assert.throws(getHiddenValue({}), errMessageIndex);
+assert.throws(getHiddenValue({}, null), errMessageIndex);
+assert.throws(getHiddenValue({}, []), errMessageIndex);
+assert.deepStrictEqual(
+  binding.getHiddenValue({}, kArrowMessagePrivateSymbolIndex),
+  undefined);
+
+assert.throws(setHiddenValue(), errMessageObj);
+assert.throws(setHiddenValue(null, 'foo'), errMessageObj);
+assert.throws(setHiddenValue(undefined, 'foo'), errMessageObj);
+assert.throws(setHiddenValue('bar', 'foo'), errMessageObj);
+assert.throws(setHiddenValue(85, 'foo'), errMessageObj);
+assert.throws(setHiddenValue({}), errMessageIndex);
+assert.throws(setHiddenValue({}, null), errMessageIndex);
+assert.throws(setHiddenValue({}, []), errMessageIndex);
 const obj = {};
-assert.strictEqual(internalUtil.setHiddenValue(obj, 'foo', 'bar'), true);
-assert.strictEqual(internalUtil.getHiddenValue(obj, 'foo'), 'bar');
+assert.strictEqual(
+  binding.setHiddenValue(obj, kArrowMessagePrivateSymbolIndex, 'bar'),
+  true);
+assert.strictEqual(
+  binding.getHiddenValue(obj, kArrowMessagePrivateSymbolIndex),
+  'bar');
 
 let arrowMessage;
 
 try {
-  require('../fixtures/syntax/bad_syntax');
+  require(fixtures.path('syntax', 'bad_syntax'));
 } catch (err) {
-  arrowMessage = internalUtil.getHiddenValue(err, 'node:arrowMessage');
+  arrowMessage =
+      binding.getHiddenValue(err, kArrowMessagePrivateSymbolIndex);
 }
 
 assert(/bad_syntax\.js:1/.test(arrowMessage));
-
-const args = [
-  '--expose-internals',
-  '-e',
-  "require('internal/util').error('foo %d', 5)"
-];
-const result = spawnSync(process.argv[0], args, { encoding: 'utf8' });
-assert.strictEqual(result.stderr.indexOf('%'), -1);
-assert(/foo 5/.test(result.stderr));

@@ -1,45 +1,27 @@
 'use strict';
-var common = require('../common');
-var assert = require('assert');
+const common = require('../common');
 
-if (!common.hasCrypto) {
-  console.log('1..0 # Skipped: missing crypto');
-  return;
-}
-var tls = require('tls');
-var net = require('net');
+if (!common.hasCrypto)
+  common.skip('missing crypto');
 
-var fs = require('fs');
+const tls = require('tls');
+const net = require('net');
 
-var success = false;
-
-function filenamePEM(n) {
-  return require('path').join(common.fixturesDir, 'keys', n + '.pem');
-}
-
-function loadPEM(n) {
-  return fs.readFileSync(filenamePEM(n));
-}
-
-var server = net.Server(function(raw) {
-  var pair = tls.createSecurePair(null, true, false, false);
+const server = net.Server(common.mustCall(function(raw) {
+  const pair = tls.createSecurePair(null, true, false, false);
   pair.on('error', function() {});
-  pair.ssl.setSNICallback(function() {
+  pair.ssl.setSNICallback(common.mustCall(function() {
     raw.destroy();
     server.close();
-    success = true;
-  });
+  }));
   require('_tls_legacy').pipe(pair, raw);
-}).listen(common.PORT, function() {
+})).listen(0, function() {
   tls.connect({
-    port: common.PORT,
+    port: this.address().port,
     rejectUnauthorized: false,
     servername: 'server'
   }, function() {
   }).on('error', function() {
     // Just ignore
   });
-});
-process.on('exit', function() {
-  assert(success);
 });

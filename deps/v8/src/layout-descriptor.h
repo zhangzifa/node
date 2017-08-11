@@ -83,6 +83,7 @@ class LayoutDescriptor : public FixedTypedArray<Uint32ArrayTraits> {
   // For our gdb macros, we should perhaps change these in the future.
   void Print();
 
+  void ShortPrint(std::ostream& os);
   void Print(std::ostream& os);  // NOLINT
 #endif
 
@@ -153,7 +154,7 @@ class LayoutDescriptorHelper {
   int header_size_;
   LayoutDescriptor* layout_descriptor_;
 };
-}
-}  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
 
 #endif  // V8_LAYOUT_DESCRIPTOR_H_

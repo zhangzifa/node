@@ -23,14 +23,15 @@ class LivenessAnalysisTest : public GraphTest {
  public:
   explicit LivenessAnalysisTest(int locals_count = 4)
       : locals_count_(locals_count),
-        machine_(zone(), kRepWord32),
+        machine_(zone(), MachineRepresentation::kWord32),
         javascript_(zone()),
-        jsgraph_(isolate(), graph(), common(), &javascript_, &machine_),
-        analyzer_(locals_count, zone()),
-        empty_values_(graph()->NewNode(common()->StateValues(0), 0, nullptr)),
+        jsgraph_(isolate(), graph(), common(), &javascript_, nullptr,
+                 &machine_),
+        analyzer_(locals_count, false, zone()),
+        empty_values_(graph()->NewNode(
+            common()->StateValues(0, SparseInputMask::Dense()), 0, nullptr)),
         next_checkpoint_id_(0),
         current_block_(nullptr) {}
-
 
  protected:
   JSGraph* jsgraph() { return &jsgraph_; }
@@ -38,9 +39,9 @@ class LivenessAnalysisTest : public GraphTest {
   LivenessAnalyzer* analyzer() { return &analyzer_; }
   void Run() {
     StateValuesCache cache(jsgraph());
-    NonLiveFrameStateSlotReplacer replacer(&cache,
-                                           jsgraph()->UndefinedConstant(),
-                                           analyzer()->local_count(), zone());
+    NonLiveFrameStateSlotReplacer replacer(
+        &cache, jsgraph()->UndefinedConstant(), analyzer()->local_count(),
+        false, zone());
     analyzer()->Run(&replacer);
   }
 
@@ -48,7 +49,8 @@ class LivenessAnalysisTest : public GraphTest {
     int ast_num = next_checkpoint_id_++;
     int first_const = intconst_from_bailout_id(ast_num, locals_count_);
 
-    const Operator* locals_op = common()->StateValues(locals_count_);
+    const Operator* locals_op =
+        common()->StateValues(locals_count_, SparseInputMask::Dense());
 
     ZoneVector<Node*> local_inputs(locals_count_, nullptr, zone());
     for (int i = 0; i < locals_count_; i++) {
@@ -60,7 +62,7 @@ class LivenessAnalysisTest : public GraphTest {
     const FrameStateFunctionInfo* state_info =
         common()->CreateFrameStateFunctionInfo(
             FrameStateType::kJavaScriptFunction, 0, locals_count_,
-            Handle<SharedFunctionInfo>(), CALL_MAINTAINS_NATIVE_CONTEXT);
+            Handle<SharedFunctionInfo>());
 
     const Operator* op = common()->FrameState(
         BailoutId(ast_num), OutputFrameStateCombine::Ignore(), state_info);

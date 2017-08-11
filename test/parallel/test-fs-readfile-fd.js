@@ -1,10 +1,9 @@
 'use strict';
-var common = require('../common');
-var assert = require('assert');
-
-var path = require('path'),
-    fs = require('fs'),
-    fn = path.join(common.fixturesDir, 'empty.txt');
+const common = require('../common');
+const assert = require('assert');
+const path = require('path');
+const fs = require('fs');
+const fn = path.join(common.fixturesDir, 'empty.txt');
 
 tempFd(function(fd, close) {
   fs.readFile(fd, function(err, data) {
@@ -30,18 +29,17 @@ tempFdSync(function(fd) {
 
 function tempFd(callback) {
   fs.open(fn, 'r', function(err, fd) {
-    if (err) throw err;
-
+    assert.ifError(err);
     callback(fd, function() {
       fs.close(fd, function(err) {
-        if (err) throw err;
+        assert.ifError(err);
       });
     });
   });
 }
 
 function tempFdSync(callback) {
-  var fd = fs.openSync(fn, 'r');
+  const fd = fs.openSync(fn, 'r');
   callback(fd);
   fs.closeSync(fd);
 }

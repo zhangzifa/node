@@ -11,17 +11,11 @@ import urllib2
 
 from common_includes import *
 
-
 class Preparation(Step):
   MESSAGE = "Preparation."
 
   def RunStep(self):
-    fetchspecs = [
-      "+refs/heads/*:refs/heads/*",
-      "+refs/pending/*:refs/pending/*",
-      "+refs/pending-tags/*:refs/pending-tags/*",
-    ]
-    self.Git("fetch origin %s" % " ".join(fetchspecs))
+    self.Git("fetch origin +refs/heads/*:refs/heads/*")
     self.GitCheckout("origin/master")
     self.DeleteBranch("work-branch")
 
@@ -156,14 +150,26 @@ class EditChangeLog(Step):
     TextToFile(changelog_entry, self.Config("CHANGELOG_ENTRY_FILE"))
 
 
+class PushBranchRef(Step):
+  MESSAGE = "Create branch ref."
+
+  def RunStep(self):
+    cmd = "push origin %s:refs/heads/%s" % (self["push_hash"], self["version"])
+    if self._options.dry_run:
+      print "Dry run. Command:\ngit %s" % cmd
+    else:
+      self.Git(cmd)
+
+
 class MakeBranch(Step):
   MESSAGE = "Create the branch."
 
   def RunStep(self):
     self.Git("reset --hard origin/master")
-    self.Git("checkout -b work-branch %s" % self["push_hash"])
+    self.Git("new-branch work-branch --upstream origin/%s" % self["version"])
     self.GitCheckoutFile(CHANGELOG_FILE, self["latest_version"])
     self.GitCheckoutFile(VERSION_FILE, self["latest_version"])
+    self.GitCheckoutFile(WATCHLISTS_FILE, self["latest_version"])
 
 
 class AddChangeLog(Step):
@@ -181,6 +187,19 @@ class SetVersion(Step):
 
   def RunStep(self):
     self.SetVersion(os.path.join(self.default_cwd, VERSION_FILE), "new_")
+
+
+class EnableMergeWatchlist(Step):
+  MESSAGE = "Enable watchlist entry for merge notifications."
+
+  def RunStep(self):
+    old_watchlist_content = FileToText(os.path.join(self.default_cwd,
+                                                    WATCHLISTS_FILE))
+    new_watchlist_content = re.sub("(# 'v8-merges@googlegroups\.com',)",
+                                   "'v8-merges@googlegroups.com',",
+                                   old_watchlist_content)
+    TextToFile(new_watchlist_content, os.path.join(self.default_cwd,
+                                                   WATCHLISTS_FILE))
 
 
 class CommitBranch(Step):
@@ -214,12 +233,7 @@ class PushBranch(Step):
   MESSAGE = "Push changes."
 
   def RunStep(self):
-    pushspecs = [
-      "refs/heads/work-branch:refs/pending/heads/%s" % self["version"],
-      "%s:refs/pending-tags/heads/%s" % (self["push_hash"], self["version"]),
-      "%s:refs/heads/%s" % (self["push_hash"], self["version"]),
-    ]
-    cmd = "push origin %s" % " ".join(pushspecs)
+    cmd = "cl land --bypass-hooks -f"
     if self._options.dry_run:
       print "Dry run. Command:\ngit %s" % cmd
     else:
@@ -285,9 +299,11 @@ class CreateRelease(ScriptsBase):
       DetectLastRelease,
       PrepareChangeLog,
       EditChangeLog,
+      PushBranchRef,
       MakeBranch,
       AddChangeLog,
       SetVersion,
+      EnableMergeWatchlist,
       CommitBranch,
       PushBranch,
       TagRevision,

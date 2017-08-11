@@ -4,8 +4,10 @@
 
 #if V8_TARGET_ARCH_PPC
 
-#include "src/codegen.h"
 #include "src/debug/debug.h"
+
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
 
 namespace v8 {
 namespace internal {
@@ -24,25 +26,25 @@ void EmitDebugBreakSlot(MacroAssembler* masm) {
 }
 
 
-void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode,
-                                int call_argc) {
+void DebugCodegen::GenerateSlot(MacroAssembler* masm, RelocInfo::Mode mode) {
   // Generate enough nop's to make space for a call instruction. Avoid emitting
   // the trampoline pool in the debug break slot code.
   Assembler::BlockTrampolinePoolScope block_trampoline_pool(masm);
-  masm->RecordDebugBreakSlot(mode, call_argc);
+  masm->RecordDebugBreakSlot(mode);
   EmitDebugBreakSlot(masm);
 }
 
 
-void DebugCodegen::ClearDebugBreakSlot(Address pc) {
-  CodePatcher patcher(pc, Assembler::kDebugBreakSlotInstructions);
+void DebugCodegen::ClearDebugBreakSlot(Isolate* isolate, Address pc) {
+  CodePatcher patcher(isolate, pc, Assembler::kDebugBreakSlotInstructions);
   EmitDebugBreakSlot(patcher.masm());
 }
 
 
-void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
-  DCHECK_EQ(Code::BUILTIN, code->kind());
-  CodePatcher patcher(pc, Assembler::kDebugBreakSlotInstructions);
+void DebugCodegen::PatchDebugBreakSlot(Isolate* isolate, Address pc,
+                                       Handle<Code> code) {
+  DCHECK(code->is_debug_stub());
+  CodePatcher patcher(isolate, pc, Assembler::kDebugBreakSlotInstructions);
   // Patch the code changing the debug break slot code from
   //
   //   ori r3, r3, 0
@@ -64,6 +66,10 @@ void DebugCodegen::PatchDebugBreakSlot(Address pc, Handle<Code> code) {
   patcher.masm()->bctrl();
 }
 
+bool DebugCodegen::DebugBreakSlotIsPatched(Address pc) {
+  Instr current_instr = Assembler::instr_at(pc);
+  return !Assembler::IsNop(current_instr, Assembler::DEBUG_BREAK_NOP);
+}
 
 void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
                                           DebugBreakCallHelperMode mode) {
@@ -71,17 +77,15 @@ void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
   {
     FrameAndConstantPoolScope scope(masm, StackFrame::INTERNAL);
 
-    // Load padding words on stack.
-    __ LoadSmiLiteral(ip, Smi::FromInt(LiveEdit::kFramePaddingValue));
-    for (int i = 0; i < LiveEdit::kFramePaddingInitialSize; i++) {
-      __ push(ip);
+    // Push arguments for DebugBreak call.
+    if (mode == SAVE_RESULT_REGISTER) {
+      // Break on return.
+      __ push(r3);
+    } else {
+      // Non-return breaks.
+      __ Push(masm->isolate()->factory()->the_hole_value());
     }
-    __ LoadSmiLiteral(ip, Smi::FromInt(LiveEdit::kFramePaddingInitialSize));
-    __ push(ip);
-
-    if (mode == SAVE_RESULT_REGISTER) __ push(r3);
-
-    __ mov(r3, Operand::Zero());  // no arguments
+    __ mov(r3, Operand(1));
     __ mov(r4,
            Operand(ExternalReference(
                Runtime::FunctionForId(Runtime::kDebugBreak), masm->isolate())));
@@ -92,61 +96,53 @@ void DebugCodegen::GenerateDebugBreakStub(MacroAssembler* masm,
     if (FLAG_debug_code) {
       for (int i = 0; i < kNumJSCallerSaved; i++) {
         Register reg = {JSCallerSavedCode(i)};
-        __ mov(reg, Operand(kDebugZapValue));
+        // Do not clobber r3 if mode is SAVE_RESULT_REGISTER. It will
+        // contain return value of the function.
+        if (!(reg.is(r3) && (mode == SAVE_RESULT_REGISTER))) {
+          __ mov(reg, Operand(kDebugZapValue));
+        }
       }
     }
-
-    if (mode == SAVE_RESULT_REGISTER) __ pop(r3);
-
-    // Don't bother removing padding bytes pushed on the stack
-    // as the frame is going to be restored right away.
-
     // Leave the internal frame.
   }
 
-  // Now that the break point has been handled, resume normal execution by
-  // jumping to the target address intended by the caller and that was
-  // overwritten by the address of DebugBreakXXX.
-  ExternalReference after_break_target =
-      ExternalReference::debug_after_break_target_address(masm->isolate());
-  __ mov(ip, Operand(after_break_target));
-  __ LoadP(ip, MemOperand(ip));
-  __ JumpToJSEntry(ip);
-}
+  __ MaybeDropFrames();
 
-
-void DebugCodegen::GeneratePlainReturnLiveEdit(MacroAssembler* masm) {
+  // Return to caller.
   __ Ret();
 }
 
+void DebugCodegen::GenerateHandleDebuggerStatement(MacroAssembler* masm) {
+  {
+    FrameScope scope(masm, StackFrame::INTERNAL);
+    __ CallRuntime(Runtime::kHandleDebuggerStatement, 0);
+  }
+  __ MaybeDropFrames();
 
-void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
-  ExternalReference restarter_frame_function_slot =
-      ExternalReference::debug_restarter_frame_function_pointer_address(
-          masm->isolate());
-  __ mov(ip, Operand(restarter_frame_function_slot));
-  __ li(r4, Operand::Zero());
-  __ StoreP(r4, MemOperand(ip, 0));
-
-  // Load the function pointer off of our current stack frame.
-  __ LoadP(r4, MemOperand(fp, StandardFrameConstants::kConstantPoolOffset -
-                                  kPointerSize));
-
-  // Pop return address and frame
-  __ LeaveFrame(StackFrame::INTERNAL);
-
-  // Load context from the function.
-  __ LoadP(cp, FieldMemOperand(r4, JSFunction::kContextOffset));
-
-  // Get function code.
-  __ LoadP(ip, FieldMemOperand(r4, JSFunction::kSharedFunctionInfoOffset));
-  __ LoadP(ip, FieldMemOperand(ip, SharedFunctionInfo::kCodeOffset));
-  __ addi(ip, ip, Operand(Code::kHeaderSize - kHeapObjectTag));
-
-  // Re-run JSFunction, r4 is function, cp is context.
-  __ Jump(ip);
+  // Return to caller.
+  __ Ret();
 }
 
+void DebugCodegen::GenerateFrameDropperTrampoline(MacroAssembler* masm) {
+  // Frame is being dropped:
+  // - Drop to the target frame specified by r4.
+  // - Look up current function on the frame.
+  // - Leave the frame.
+  // - Restart the frame by calling the function.
+
+  __ mr(fp, r4);
+  __ LoadP(r4, MemOperand(fp, JavaScriptFrameConstants::kFunctionOffset));
+  __ LeaveFrame(StackFrame::INTERNAL);
+  __ LoadP(r3, FieldMemOperand(r4, JSFunction::kSharedFunctionInfoOffset));
+  __ LoadP(
+      r3, FieldMemOperand(r3, SharedFunctionInfo::kFormalParameterCountOffset));
+  __ mr(r5, r3);
+
+  ParameterCount dummy1(r5);
+  ParameterCount dummy2(r3);
+  __ InvokeFunction(r4, dummy1, dummy2, JUMP_FUNCTION,
+                    CheckDebugStepCallWrapper());
+}
 
 const bool LiveEdit::kFrameDropperSupported = true;
 
